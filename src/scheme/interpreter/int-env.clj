@@ -612,6 +612,11 @@
     env)
   )
 
+(defn eval-cond 
+  [exp env] 
+  (do-eval (cond->if exp) env) ;eval
+)
+
 (defn eval-definition 
   [exp env] 
   (define-variable! (definition-variable exp) (do-eval (definition-value exp) env) env))
@@ -667,6 +672,7 @@
    'quote text-of-quotation
    'set! eval-assignment
    'define eval-definition
+   'cond eval-cond
    'if eval-if
    'lambda eval-lambda
    'begin eval-sequence
@@ -706,13 +712,6 @@
       (self-evaluating? exp) exp
       (variable? exp) (lookup-variable-value exp env)
       (can-eval-from-map? global-eval-map exp) (do-eval-from-map global-eval-map exp env)
-      ;(quoted? exp) (text-of-quotation exp)
-      ;(assignment? exp) (eval-assignment exp env)
-      ;(definition? exp) (eval-definition exp env)
-      ;(if? exp) (eval-if exp env)
-      ;(lambda? exp) (eval-lambda exp env)
-      ;(begin? exp) (eval-sequence exp env)
-      (cond? exp) (do-eval (cond->if exp) env);eval
       (application? exp) (do-apply ;apply
                            (do-eval (operator exp) env);eval
                            (list-of-values (operands exp) env))
@@ -787,24 +786,6 @@
 )
 ;(do-eval '((lambda (a b) (+ a b)) 1 2) global-environment)
 
-(defn do-eval-cond 
-  ([exp env]
-    (cond 
-      (self-evaluating? exp) exp
-      (variable? exp) (lookup-variable-value exp env)
-      (quoted? exp) (text-of-quotation exp)
-      (assignment? exp) (eval-assignment exp env)
-      (definition? exp) (eval-definition exp env)
-      (if? exp) (eval-if exp env)
-      (lambda? exp) (make-procedure (lambda-parameters exp) (lambda-body exp) env)
-      (begin? exp) (eval-sequence exp env)
-      (cond? exp) (do-eval (cond->if exp) env);eval
-      (application? exp) (do-apply ;apply
-                           (do-eval (operator exp) env);eval
-                           (list-of-values (operands exp) env))
-      :else (error "Unknown expression type -- EVAL" exp)))
-)
-
 (defn user-print 
   [object]
   (if (compound-procedure? object)
@@ -818,9 +799,9 @@
     )
   )
 
-(def input-prompt ";;; M-Eval input:")
+(def input-prompt ";;; input:")
 
-(def output-prompt ";;; M-Eval value:")
+(def output-prompt ";;; value:")
 
 (defn driver-loop
   ([env]
