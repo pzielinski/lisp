@@ -444,6 +444,7 @@
 ;----------------------------------------------------------------------------------------------
 ;implementation
 
+(declare analyze)
 (declare do-eval)
 
 (defn primitive-procedure-impl
@@ -557,7 +558,7 @@
   (nth exp 2))
 
 (defn text-of-quotation 
-  [exp env] 
+  [exp] 
   (nth exp 1))
 
 (defn if-alternative 
@@ -580,10 +581,6 @@
   [exp] 
   (nth exp 1))
 
-(defn list-of-values 
-  [operands env]
-  (map #(do-eval % env) operands))
-
 (defn operands 
   [exp] 
   (rest exp))
@@ -604,36 +601,127 @@
   [exp] 
   (nth exp 1))
 
-(defn eval-assignment 
-  [exp env]
-  (set-variable-value! 
-    (assignment-variable exp) 
-    (do-eval (assignment-value exp) env) 
-    env)
+(defn analyze-self-evaluating 
+  [exp] 
+  (fn [env] exp)
   )
 
-(defn eval-cond 
-  [exp env] 
-  (do-eval (cond->if exp) env) ;eval
+(defn analyze-variable 
+  [exp] 
+  (fn [env] (lookup-variable-value exp env))
+  )
+
+(defn analyze-quotation 
+  [exp]
+  (let [value (text-of-quotation exp)]
+    (fn [env] value))
+  )
+
+(defn analyze-assignment 
+  [exp] 
+  (let [variable (assignment-variable exp)
+        value-proc (analyze (assignment-value exp))
+        ]
+    (fn [env] (set-variable-value! variable (value-proc env) env) 'ok)
+    )
+  )
+
+(defn analyze-cond 
+  [exp]
+  (let [condifexp-proc (analyze (cond->if exp))] 
+    (fn [env] (condifexp-proc env))
+    )
+  )
+
+(defn analyze-definition 
+  [exp] 
+  (let [variable (definition-variable exp)
+        value-proc (analyze (definition-value exp))
+        ]
+    (fn [env] (define-variable! variable (value-proc env) env) 'ok)
+    )
+  )
+
+(defn analyze-if 
+  [exp]
+  (let [predicate-proc (analyze (if-predicate exp))
+        consequent-proc (analyze (if-consequent exp))
+        alternative-proc (analyze (if-alternative exp))
+        ]
+    (fn [env]
+      (if (true? (predicate-proc env))
+        (consequent-proc env)
+        (alternative-proc env))
+      )
+    )
+  )
+
+(defn analyze-lambda 
+  [exp] 
+  (let [params (lambda-parameters exp)
+        body-proc (analyze (lambda-body exp)) ;single expression only !!!
+        ]
+    (fn [env] (make-procedure params body-proc env))
+    )
+  )
+
+(defn analyze-sequence 
+  ([exps]
+    (cond
+      (empty? exps) (fn [env] )
+      (= (count exps) 1) (fn [env] ((analyze (first exps)) env))
+      :else
+      (reduce 
+        (fn [exp1 exp2]
+          (let [exp1-proc (analyze exp1)
+                exp2-proc (analyze exp2)
+                ]        
+            (fn [env] (exp1-proc env) (exp2-proc env))
+            ))
+        exps
+        )  
+      ;(map-nth #(do-eval % env) exps)
+      ))
+  {
+   :test
+   (fn []
+       ;(is (= (fn [env] ) (analyze-sequence '())))
+     )
+   }
+  )
+
+(defn analyze-begin
+  [exp]
+  (analyze-sequence (begin-actions exp)) 
 )
 
-(defn eval-definition 
-  [exp env] 
-  (define-variable! (definition-variable exp) (do-eval (definition-value exp) env) env))
+(defn execute-application [procedure arguments] 
+  (cond 
+    (primitive-procedure? procedure) 
+       (apply-primitive-procedure procedure arguments)
+    (compound-procedure? procedure) 
+       (let [params (procedure-parameters procedure)
+             proc-env (procedure-environment procedure)
+             env (extend-environment params arguments proc-env)
+             body (procedure-body procedure) 
+             ] 
+         (body env)
+         )
+    :else 
+       (error "Unknown procedure type -- APPLY" procedure)))
 
-(defn eval-if 
-  [exp env] 
-  (if (true? (do-eval (if-predicate exp) env))
-    (do-eval (if-consequent exp) env)
-    (do-eval (if-alternative exp) env)))
-
-(defn eval-lambda 
-  [exp env] 
-  (make-procedure (lambda-parameters exp) (lambda-body exp) env))
-
-(defn eval-sequence 
-  [exp env] 
-  (map-nth #(do-eval % env) (begin-actions exp)))
+(defn analyze-application 
+  [exp] 
+  (let [operator-proc (analyze (operator exp))
+        value-procs (map #(analyze %) (operands exp))
+        ]
+    (fn [env] 
+      (let [operator (operator-proc env)
+            args (map #(% env) value-procs)
+            ]
+        (execute-application operator args)))
+    )
+  )
 
 (defn setup-environment
   ([primitive-procedure-impl-map]
@@ -655,67 +743,65 @@
    }
 )
 
-(defn do-apply [procedure arguments] 
-  (cond 
-    (primitive-procedure? procedure) (apply-primitive-procedure procedure arguments)
-    (compound-procedure? procedure) 
-    (do-eval ;eval 
-      (procedure-body procedure)
-      (extend-environment
-        (procedure-parameters procedure)
-        arguments
-        (procedure-environment procedure)))
-    :else (error "Unknown procedure type -- APPLY" procedure)))
-
-(def global-eval-map
+(def global-analyze-map
   {
-   'quote text-of-quotation
-   'set! eval-assignment
-   'define eval-definition
-   'cond eval-cond
-   'if eval-if
-   'lambda eval-lambda
-   'begin eval-sequence
+   'quote analyze-quotation
+   'set! analyze-assignment
+   'define analyze-definition
+   'cond analyze-cond
+   'if analyze-if
+   'lambda analyze-lambda
+   'begin analyze-begin
    }
 )
 
-(defn can-eval-from-map? 
-  ([eval-map exp]
+(defn can-analyze-from-map? 
+  ([the-map exp]
     (if (empty? exp)
       false
-      (not (nil? (eval-map (first exp))))))
+      (not (nil? (the-map (first exp))))))
   {
    :test
    (fn []
-       (is (= true (can-eval-from-map? global-eval-map '(quote x))))
-       (is (= false (can-eval-from-map? global-eval-map '(x))))
-       (is (= false (can-eval-from-map? global-eval-map '())))
+       (is (= true (can-analyze-from-map? global-analyze-map '(quote x))))
+       (is (= false (can-analyze-from-map? global-analyze-map '(x))))
+       (is (= false (can-analyze-from-map? global-analyze-map '())))
      )
    }
 )
 
-(defn do-eval-from-map 
-  ([eval-map exp env]
-  (let [proc (eval-map (first exp))]
-    (proc exp env)))
+(defn do-analyze-from-map 
+  ([the-map exp]
+  (let [proc (the-map (first exp))]
+    (proc exp)))
   {
    :test
    (fn []
-       (is (= 'x (do-eval-from-map global-eval-map '(quote x) nil)))
+       (is (= 
+             'x 
+             ((do-analyze-from-map global-analyze-map '(quote x)) nil)
+             )
+         )
      )
    }
+)
+
+(defn analyze 
+  ([exp]
+    (cond 
+      (self-evaluating? exp) (analyze-self-evaluating exp)
+      (variable? exp) (analyze-variable exp)
+      (can-analyze-from-map? global-analyze-map exp) (do-analyze-from-map global-analyze-map exp)
+      (application? exp) (analyze-application exp)
+      :else (error "Unknown expression type -- EVAL" exp)))
 )
 
 (defn do-eval 
   ([exp env]
-    (cond 
-      (self-evaluating? exp) exp
-      (variable? exp) (lookup-variable-value exp env)
-      (can-eval-from-map? global-eval-map exp) (do-eval-from-map global-eval-map exp env)
-      (application? exp) (do-apply ;apply
-                           (do-eval (operator exp) env);eval
-                           (list-of-values (operands exp) env))
-      :else (error "Unknown expression type -- EVAL" exp)))
+    (let [proc (analyze exp)]
+      (proc env)
+      )
+    )
   {
    :test
    (fn []
@@ -761,7 +847,7 @@
        (is (= 3 (do-eval '(if (> 2 1) (+ 1 2) 'b) env)))
        (is (= 5 (do-eval '(if (< 2 1) (+ 1 2) (- 7 2)) env)))
        ;lambda
-       (is (= (make-procedure '(a b) '(+ a b) env) (do-eval '(lambda (a b) (+ a b)) env)))
+       (is (= 5 (do-eval '((lambda (a b) (+ a b)) 2 3) env)))
        ;begin
        (let [f1 (make-frame-from-map '{})
              e1 (extend-environment-with-frame f1 env)]
