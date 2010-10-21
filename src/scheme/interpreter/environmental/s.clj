@@ -218,13 +218,33 @@
     )
   )
 
-(defn analyze-definition 
+(defn analyze-definition-of-function 
+  [exp] 
+  (let [variable (definition-variable exp)
+        function-name (first variable)
+        params (rest variable)
+        body-proc (analyze (definition-value exp)) ;single expression only !!!
+        ]
+
+    (fn [env] (define-variable! function-name (make-procedure params body-proc env) env) 'ok)
+    )
+  )
+
+(defn analyze-definition-of-variable 
   [exp] 
   (let [variable (definition-variable exp)
         value-proc (analyze (definition-value exp))
         ]
     (fn [env] (define-variable! variable (value-proc env) env) 'ok)
     )
+  )
+
+(defn analyze-definition 
+  [exp] 
+  (let [variable (definition-variable exp)]
+    (if (variable? variable)
+      (analyze-definition-of-variable exp)
+      (analyze-definition-of-function exp)))
   )
 
 (defn analyze-if 
@@ -424,6 +444,16 @@
          (is (= 3 (lookup-variable-value 'y e1)))
          (do-eval '(define x (+ x y)) e1)
          (is (= 5 (lookup-variable-value 'x e1)))
+         (do-eval '(define doubler (lambda (x) (+ x x))) e1)
+         (is (= 6 (do-eval '(doubler 3) e1)))
+       )
+       ;definition of function
+       (let [f1 (make-frame-from-map '{})
+             e1 (extend-environment-with-frame f1 env)]
+         (do-eval '(define (doubler x) (+ x x)) e1)
+         (is (not (nil? (lookup-variable-value 'doubler e1))))
+         (do-eval '(define y (doubler 3)) e1)
+         (is (= 6 (lookup-variable-value 'y e1)))
        )
        ;if
        (is (= 1 (do-eval '(if true 1 2) env)))
@@ -498,3 +528,4 @@
 ;(run-all-tests) 
 ;(with-junit-output (run-tests))
 ;(run-tests)
+;C:\Users\Piotr\workspace\lisp\classes>java -classpath .\..\clojure.jar;C:\Users\Piotr\workspace\lisp\classes clojure.main -i "scheme\interpreter\environmental\s.clj" -e "(use 'clojure.test) (run-all-tests)"
