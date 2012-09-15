@@ -501,29 +501,31 @@
     )
   )
 
-(def input-prompt ";;; input:")
+(def input-prompt ";;; in>:")
 
-(def output-prompt ";;; value:")
+(def output-prompt ";;; out:")
 
 (defn driver-loop
   ([env]
-    (println input-prompt)
     (let [input (read)]
-      (let [output (do-eval input env)]
-        (println output-prompt)
-        (user-print output)
-        )
-      )
-    )
-  )
+      (println input)
+      (if (= (str input) "exit")
+        "exit"
+        (if (not (nil? input))
+          (let [output (do-eval input env)]
+            (println output-prompt)
+            (user-print output)
+            ))))))
 
 (def global-environment 
   (setup-environment global-primitive-procedure-impl-map))
 
 (defn s 
   []
-  (driver-loop global-environment)
-  (s))
+  (if (= (driver-loop global-environment) "exit")
+    (println "exit requested by user")
+    (s))
+  )
 
 ;(run-all-tests) 
 ;(with-junit-output (run-tests))
