@@ -5,7 +5,7 @@
 
 (use 'scheme.interpreter.utils)
 (use 'scheme.interpreter.syntax)
-(use 'scheme.interpreter.environmental.environment)
+(use 'scheme.interpreter.environmental.env)
 
 ;clojure specific
 (def apply-in-underlying-interpreter 
@@ -193,7 +193,7 @@
 
 (defn analyze-variable 
   [exp] 
-  (fn [env] (lookup-variable-value exp env))
+  (fn [env] (lookup-variable-value-in-env exp env))
   )
 
 (defn analyze-quotation 
@@ -207,7 +207,7 @@
   (let [variable (assignment-variable exp)
         value-proc (analyze (assignment-value exp))
         ]
-    (fn [env] (set-variable-value! variable (value-proc env) env) 'ok)
+    (fn [env] (set-variable-value-in-env variable (value-proc env) env))
     )
   )
 
@@ -226,7 +226,7 @@
         body-proc (analyze (definition-value exp)) ;single expression only !!!
         ]
 
-    (fn [env] (define-variable! function-name (make-procedure params body-proc env) env) 'ok)
+    (fn [env] (define-variable! function-name (make-procedure params body-proc env) env))
     )
   )
 
@@ -235,7 +235,7 @@
   (let [variable (definition-variable exp)
         value-proc (analyze (definition-value exp))
         ]
-    (fn [env] (define-variable! variable (value-proc env) env) 'ok)
+    (fn [env] (define-variable! variable (value-proc env) env))
     )
   )
 
@@ -329,24 +329,12 @@
   )
 
 (defn setup-environment
-  ([primitive-procedure-impl-map]
-  (let [initial-env (extend-environment-with-frame 
-                      (make-frame-from-map 
-                        (make-primitives-map 
-                          primitive-procedure-impl-map)) 
-                      (the-empty-environment))]
-    (define-variable! 'true true initial-env)
-    (define-variable! 'false false initial-env)
-    initial-env))
-  {
-   :test
-   (fn []
-       (is (= (make-primitive first) (lookup-variable-value 'car (setup-environment (hash-map 'car first)))))
-       (is (= true (lookup-variable-value 'true (setup-environment (hash-map 'car first)))))
-       (is (= false (lookup-variable-value 'false (setup-environment (hash-map 'car first)))))
-     )
-   }
-)
+  [primitive-procedure-impl-map env]
+  (extend-environment-with-map 
+    (make-primitives-map 
+      primitive-procedure-impl-map) 
+    (define-variable! 'false false (define-variable! 'true true env)))
+  )
 
 (def global-analyze-map
   {
@@ -410,7 +398,7 @@
   {
    :test
    (fn []
-     (let [env (setup-environment global-primitive-procedure-impl-map)]
+     (let [env (setup-environment global-primitive-procedure-impl-map (the-empty-environment))]
        ;primitive
        (is (= false (do-eval 'false env)))
        (is (= true (do-eval 'true env)))
@@ -422,38 +410,35 @@
        (is (= "1" (do-eval "1" env)))
        ;variable
        (is (thrown? Throwable (do-eval 'v env)) "Variable is not bound!")
-       (is (= 1 (do-eval 'v (extend-environment-with-frame (make-frame-from-map '{v 1}) env))))
+       (is (= 1 (do-eval 'v (extend-environment-with-map '{v 1}) env)))
        ;quoted
        (is (= 'x (do-eval '(quote x) env)))
        ;assignment
-       (let [f1 (make-frame-from-map '{})
-             e1 (extend-environment-with-frame f1 env)]
+       (let [e1 (extend-environment-with-map '{} env)]
          (do-eval '(set! x 2) e1)
-         (is (= 2 (lookup-variable-value 'x e1)))
+         (is (= 2 (lookup-variable-value-in-env 'x e1)))
          (do-eval '(set! y (+ 1 2)) e1)
-         (is (= 3 (lookup-variable-value 'y e1)))
+         (is (= 3 (lookup-variable-value-in-env 'y e1)))
          (do-eval '(set! x (+ x y)) e1)
-         (is (= 5 (lookup-variable-value 'x e1)))
+         (is (= 5 (lookup-variable-value-in-env 'x e1)))
        )
        ;definition
-       (let [f1 (make-frame-from-map '{})
-             e1 (extend-environment-with-frame f1 env)]
+       (let [e1 (extend-environment-with-map '{} env)]
          (do-eval '(define x 2) e1)
-         (is (= 2 (lookup-variable-value 'x e1)))
+         (is (= 2 (lookup-variable-value-in-env 'x e1)))
          (do-eval '(define y (+ 1 2)) e1)
-         (is (= 3 (lookup-variable-value 'y e1)))
+         (is (= 3 (lookup-variable-value-in-env 'y e1)))
          (do-eval '(define x (+ x y)) e1)
-         (is (= 5 (lookup-variable-value 'x e1)))
+         (is (= 5 (lookup-variable-value-in-env 'x e1)))
          (do-eval '(define doubler (lambda (x) (+ x x))) e1)
          (is (= 6 (do-eval '(doubler 3) e1)))
        )
        ;definition of function
-       (let [f1 (make-frame-from-map '{})
-             e1 (extend-environment-with-frame f1 env)]
+       (let [e1 (extend-environment-with-map '{} env)]
          (do-eval '(define (doubler x) (+ x x)) e1)
-         (is (not (nil? (lookup-variable-value 'doubler e1))))
+         (is (not (nil? (lookup-variable-value-in-env 'doubler e1))))
          (do-eval '(define y (doubler 3)) e1)
-         (is (= 6 (lookup-variable-value 'y e1)))
+         (is (= 6 (lookup-variable-value-in-env 'y e1)))
        )
        ;if
        (is (= 1 (do-eval '(if true 1 2) env)))
@@ -464,11 +449,10 @@
        ;lambda
        (is (= 5 (do-eval '((lambda (a b) (+ a b)) 2 3) env)))
        ;begin
-       (let [f1 (make-frame-from-map '{})
-             e1 (extend-environment-with-frame f1 env)]
+       (let [e1 (extend-environment-with-map '{} env)]
          (do-eval '(begin (define x 2) (set! y (+ x 1))) e1)
-         (is (= 2 (lookup-variable-value 'x e1)))
-         (is (= 3 (lookup-variable-value 'y e1)))
+         (is (= 2 (lookup-variable-value-in-env 'x e1)))
+         (is (= 3 (lookup-variable-value-in-env 'y e1)))
          )
        ;cond
        (is (= 1 (do-eval '(cond (true 1) (true 2) (else 3)) env)))
@@ -518,7 +502,7 @@
             ))))))
 
 (def global-environment 
-  (setup-environment global-primitive-procedure-impl-map))
+  (setup-environment global-primitive-procedure-impl-map (the-empty-environment)))
 
 (defn s 
   []

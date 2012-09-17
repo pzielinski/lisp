@@ -1,8 +1,5 @@
 (ns scheme.interpreter.environmental.environment)
 
-(use 'clojure.test)
-;(use 'clojure.test.junit)
-
 (use 'scheme.interpreter.utils)
 
 (defn make-frame-from-map 
