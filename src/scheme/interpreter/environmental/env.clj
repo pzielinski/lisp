@@ -12,20 +12,19 @@
 
 (defn 
   set-variable-value-in-env 
-  ([variable value env]
-    (assoc env variable value))
+  [variable value env]
+    (assoc env variable value)
 )
 
 (defn 
   lookup-variable-value-in-env
-  ([variable env]
-    (get env variable (error "Unbound variable!" variable)))
+  [variable env]
+    (get env variable)
 )
 
 (defn define-variable! 
-  ([variable value env]
+  [variable value env]
     (set-variable-value-in-env variable value env)
-    ) 
   )
 
 (defn extend-environment 

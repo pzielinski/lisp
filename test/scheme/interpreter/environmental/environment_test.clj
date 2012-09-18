@@ -1,4 +1,4 @@
-(ns scheme.interpreter.environmental.environment)
+(ns scheme.interpreter.environmental.environment-test)
 
 (use 'clojure.test)
 ;(use 'clojure.test.junit)
@@ -7,7 +7,6 @@
 
 (deftest 
   test-lookup-variable-value-in-frame 
-   (fn []
      (let[
           emptyFrame (make-frame-from-map '{})
           f1 (make-frame-from-map '{a 1 b 2 c 3})
@@ -17,12 +16,11 @@
        (is (= 2 (lookup-variable-value-in-frame 'b f1)))
        (is (= 3 (lookup-variable-value-in-frame 'c f1)))
        (is (nil? (lookup-variable-value-in-frame 'd f1)))
-     ))
+     )
  )
 
 (deftest 
   test-lookup-variable-frame 
-   (fn []
      (let[
           emptyFrame (make-frame-from-map '{})
           f1 (make-frame-from-map '{a 1 b 2 c 3})
@@ -36,12 +34,11 @@
        (is (= nil (lookup-variable-frame 'd e1)))
        (is (= f2 (lookup-variable-frame 'd e2)))
        (is (= nil (lookup-variable-frame 'x e2)))
-     ))
+     )
 )
 
 (deftest
   test-lookup-variable-values 
-   (fn []
      (let[
           emptyFrame (make-frame-from-map '{})
           f1 (make-frame-from-map '{a 1 b 2 c 3})
@@ -55,12 +52,11 @@
        (is (= '() (lookup-variable-values 'd e1)))
        (is (= '(4) (lookup-variable-values 'd e2)))
        (is (= '() (lookup-variable-values 'x e2)))
-     ))
+     )
 )
 
 (deftest 
   test-lookup-variable-value 
-   (fn []
      (let[
           emptyFrame (make-frame-from-map '{})
           f1 (make-frame-from-map '{a 1 b 2 c 3})
@@ -71,11 +67,10 @@
        (is (thrown? java.lang.Throwable (lookup-variable-value 'a emptyEnv)))
        (is (thrown? java.lang.Throwable (lookup-variable-value 'x e1)))
        (is (= 1 (lookup-variable-value 'a e1)))
-     ))
+     )
 )
 
 (deftest test-set-binding-value-in-frame! 
-   (fn []
      (let[
           emptyFrame (make-frame-from-map '{})
           f1 (make-frame-from-map '{a 1 b 2 c 3})
@@ -86,11 +81,10 @@
        (is (= 2 (lookup-variable-value-in-frame 'a emptyFrame)))
        (set-binding-value-in-frame! 'a 3 f1)
        (is (= 3 (lookup-variable-value-in-frame 'a f1)))
-     ))
+     )
 )
 
 (deftest test-define-variable! 
-   (fn []
      (do
        ;should throw in empty env
        (is (thrown? Throwable (define-variable! 'a 1 (the-empty-environment))))
@@ -128,11 +122,9 @@
          (is (= 100 (lookup-variable-value-in-frame 'a f2)))
          )
        )
-     )
   )
 
 (deftest test-set-variable-value! 
-   (fn []
      (do
        ;should throw in empty env
        (is (thrown? Throwable (set-variable-value! 'a 1 (the-empty-environment))))
@@ -170,7 +162,6 @@
          (is (= 7 (lookup-variable-value-in-frame 'x f1)))
          )
        )
-     )
   )
 
 (run-tests)

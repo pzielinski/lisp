@@ -33,14 +33,8 @@
 (declare do-eval)
 
 (defn primitive-procedure-impl
-  ([primitive-procedure-impl-map, k]
-    (primitive-procedure-impl-map k))
-  {
-   :test
-   (fn []
-       (is (= first (primitive-procedure-impl (hash-map 'car first) 'car)))
-     )
-   }
+  [primitive-procedure-impl-map, k]
+    (primitive-procedure-impl-map k)
 )
 
 (defn make-begin 
@@ -52,27 +46,13 @@
   (list 'if predicate consequent alternative))
 
 (defn make-primitive 
-  ([implementation] 
-    (list 'primitive implementation))
-  {
-   :test
-   (fn []
-       (is (= (list 'primitive cons) (make-primitive cons)))
-     )
-   }
+  [implementation] 
+    (list 'primitive implementation)
 )
 
 (defn make-primitives-map 
-  ([primitive-procedure-impl-map]
+  [primitive-procedure-impl-map]
     (map-the-map identity #(make-primitive %) primitive-procedure-impl-map)
-  )
-  {
-   :test
-   (fn []
-       (is (= '{} (make-primitives-map '{})))
-       (is (= (make-primitive first) ((make-primitives-map (hash-map 'car first)) 'car)))
-     )
-   }
 )
 
 (defn make-procedure 
@@ -225,7 +205,6 @@
         params (rest variable)
         body-proc (analyze (definition-value exp)) ;single expression only !!!
         ]
-
     (fn [env] (define-variable! function-name (make-procedure params body-proc env) env))
     )
   )
@@ -271,7 +250,7 @@
   )
 
 (defn analyze-sequence 
-  ([exps]
+  [exps]
     (cond
       (empty? exps) (fn [env] )
       (= (count exps) 1) (fn [env] ((analyze (first exps)) env))
@@ -286,13 +265,7 @@
         exps
         )  
       ;(map-nth #(do-eval % env) exps)
-      ))
-  {
-   :test
-   (fn []
-       ;(is (= (fn [env] ) (analyze-sequence '())))
-     )
-   }
+      )
   )
 
 (defn analyze-begin
@@ -300,7 +273,8 @@
   (analyze-sequence (begin-actions exp)) 
 )
 
-(defn execute-application [procedure arguments] 
+(defn execute-application 
+  [procedure arguments] 
   (cond 
     (primitive-procedure? procedure) 
        (apply-primitive-procedure procedure arguments)
@@ -330,11 +304,11 @@
 
 (defn setup-environment
   [primitive-procedure-impl-map env]
+  (let [primitives-map (make-primitives-map primitive-procedure-impl-map)]
   (extend-environment-with-map 
-    (make-primitives-map 
-      primitive-procedure-impl-map) 
+    primitives-map 
     (define-variable! 'false false (define-variable! 'true true env)))
-  )
+  ))
 
 (def global-analyze-map
   {
@@ -349,125 +323,33 @@
 )
 
 (defn can-analyze-from-map? 
-  ([the-map exp]
+  [the-map exp]
     (if (empty? exp)
       false
-      (not (nil? (the-map (first exp))))))
-  {
-   :test
-   (fn []
-       (is (= true (can-analyze-from-map? global-analyze-map '(quote x))))
-       (is (= false (can-analyze-from-map? global-analyze-map '(x))))
-       (is (= false (can-analyze-from-map? global-analyze-map '())))
-     )
-   }
+      (not (nil? (the-map (first exp)))))
 )
 
 (defn do-analyze-from-map 
-  ([the-map exp]
+  [the-map exp]
   (let [proc (the-map (first exp))]
-    (proc exp)))
-  {
-   :test
-   (fn []
-       (is (= 
-             'x 
-             ((do-analyze-from-map global-analyze-map '(quote x)) nil)
-             )
-         )
-     )
-   }
+    (proc exp))
 )
 
 (defn analyze 
-  ([exp]
+  [exp]
     (cond 
       (self-evaluating? exp) (analyze-self-evaluating exp)
       (variable? exp) (analyze-variable exp)
       (can-analyze-from-map? global-analyze-map exp) (do-analyze-from-map global-analyze-map exp)
       (application? exp) (analyze-application exp)
-      :else (error "Unknown expression type -- EVAL" exp)))
+      :else (error "Unknown expression type -- EVAL" exp))
 )
 
 (defn do-eval 
-  ([exp env]
+  [exp env]
     (let [proc (analyze exp)]
       (proc env)
       )
-    )
-  {
-   :test
-   (fn []
-     (let [env (setup-environment global-primitive-procedure-impl-map (the-empty-environment))]
-       ;primitive
-       (is (= false (do-eval 'false env)))
-       (is (= true (do-eval 'true env)))
-       (is (= (make-primitive +) (do-eval '+ env)))
-       (is (= (make-primitive first) (do-eval 'car env)))
-       ;self-evaluating
-       (is (= 1 (do-eval 1 env)))
-       (is (= "" (do-eval "" env)))
-       (is (= "1" (do-eval "1" env)))
-       ;variable
-       (is (thrown? Throwable (do-eval 'v env)) "Variable is not bound!")
-       (is (= 1 (do-eval 'v (extend-environment-with-map '{v 1}) env)))
-       ;quoted
-       (is (= 'x (do-eval '(quote x) env)))
-       ;assignment
-       (let [e1 (extend-environment-with-map '{} env)]
-         (do-eval '(set! x 2) e1)
-         (is (= 2 (lookup-variable-value-in-env 'x e1)))
-         (do-eval '(set! y (+ 1 2)) e1)
-         (is (= 3 (lookup-variable-value-in-env 'y e1)))
-         (do-eval '(set! x (+ x y)) e1)
-         (is (= 5 (lookup-variable-value-in-env 'x e1)))
-       )
-       ;definition
-       (let [e1 (extend-environment-with-map '{} env)]
-         (do-eval '(define x 2) e1)
-         (is (= 2 (lookup-variable-value-in-env 'x e1)))
-         (do-eval '(define y (+ 1 2)) e1)
-         (is (= 3 (lookup-variable-value-in-env 'y e1)))
-         (do-eval '(define x (+ x y)) e1)
-         (is (= 5 (lookup-variable-value-in-env 'x e1)))
-         (do-eval '(define doubler (lambda (x) (+ x x))) e1)
-         (is (= 6 (do-eval '(doubler 3) e1)))
-       )
-       ;definition of function
-       (let [e1 (extend-environment-with-map '{} env)]
-         (do-eval '(define (doubler x) (+ x x)) e1)
-         (is (not (nil? (lookup-variable-value-in-env 'doubler e1))))
-         (do-eval '(define y (doubler 3)) e1)
-         (is (= 6 (lookup-variable-value-in-env 'y e1)))
-       )
-       ;if
-       (is (= 1 (do-eval '(if true 1 2) env)))
-       (is (= 2 (do-eval '(if false 1 2) env)))
-       (is (= 'a (do-eval '(if (> 2 1) 'a 'b) env)))
-       (is (= 3 (do-eval '(if (> 2 1) (+ 1 2) 'b) env)))
-       (is (= 5 (do-eval '(if (< 2 1) (+ 1 2) (- 7 2)) env)))
-       ;lambda
-       (is (= 5 (do-eval '((lambda (a b) (+ a b)) 2 3) env)))
-       ;begin
-       (let [e1 (extend-environment-with-map '{} env)]
-         (do-eval '(begin (define x 2) (set! y (+ x 1))) e1)
-         (is (= 2 (lookup-variable-value-in-env 'x e1)))
-         (is (= 3 (lookup-variable-value-in-env 'y e1)))
-         )
-       ;cond
-       (is (= 1 (do-eval '(cond (true 1) (true 2) (else 3)) env)))
-       (is (= 2 (do-eval '(cond (false 1) (true 2) (else 3)) env)))
-       (is (= 3 (do-eval '(cond (false 1) (false 2) (else 3)) env)))
-       (is (= 3 (do-eval '(cond (false 1) (false 2) (true 3) (else 4)) env)))
-       (is (= 2 (do-eval '(cond ((= 1 (+ 1 1)) 1) ((= 2 (+ 1 1)) 2) (else 3)) env)))
-       (is (= 3 (do-eval '(cond (false 1) (false 2) (else (+ 1 2))) env)))
-       ;application
-       (is (= 2 (do-eval '(* 1 2) env)))
-       (is (= 3 (do-eval '((lambda (a b) (+ a b)) 1 2) env)))
-       (is (= 5 (do-eval '((lambda (a b) (+ a b)) (+ 1 2) 2) env)))
-       (is (= 10 (do-eval '((lambda (a b) (+ a b)) (+ 1 2) ((lambda (a b) (+ a b)) 3 4)) env)))
-     ))
-   }
 )
 ;(do-eval '((lambda (a b) (+ a b)) 1 2) global-environment)
 ;(define fib (lambda (n) (cond ((= n 0) 0) ((= n 1) 1) (else (+ (fib (- n 1)) (fib (- n 2)))))))
@@ -490,7 +372,7 @@
 (def output-prompt ";;; out:")
 
 (defn driver-loop
-  ([env]
+  [env]
     (let [input (read)]
       (println input)
       (if (= (str input) "exit")
@@ -499,7 +381,8 @@
           (let [output (do-eval input env)]
             (println output-prompt)
             (user-print output)
-            ))))))
+            ))))
+    )
 
 (def global-environment 
   (setup-environment global-primitive-procedure-impl-map (the-empty-environment)))
