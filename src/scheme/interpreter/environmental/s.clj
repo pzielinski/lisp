@@ -34,26 +34,28 @@
 
 (defn primitive-procedure-impl
   [primitive-procedure-impl-map, k]
-    (primitive-procedure-impl-map k)
-)
+  (primitive-procedure-impl-map k)
+  )
 
 (defn make-begin 
   [the-sequence] 
-  (cons 'begin the-sequence))
+  (cons 'begin the-sequence)
+  )
 
 (defn make-if 
   [predicate consequent alternative]
-  (list 'if predicate consequent alternative))
+  (list 'if predicate consequent alternative)
+  )
 
 (defn make-primitive 
   [implementation] 
-    (list 'primitive implementation)
-)
+  (list 'primitive implementation)
+  )
 
 (defn make-primitives-map 
   [primitive-procedure-impl-map]
-    (map-the-map identity #(make-primitive %) primitive-procedure-impl-map)
-)
+  (map-the-map identity #(make-primitive %) primitive-procedure-impl-map)
+  )
 
 (defn make-procedure 
   [parameters body env] 
@@ -313,8 +315,6 @@
 (def global-analyze-map
   {
    'quote analyze-quotation
-   'set! analyze-assignment
-   'define analyze-definition
    'cond analyze-cond
    'if analyze-if
    'lambda analyze-lambda
@@ -329,6 +329,20 @@
       (not (nil? (the-map (first exp)))))
 )
 
+(defn define?
+  [exp]
+  (if (empty? exp)
+    false
+    (= 'define (first exp)))
+  )
+
+(defn set!?
+  [exp]
+  (if (empty? exp)
+    false
+    (= 'set! (first exp)))
+  )
+
 (defn do-analyze-from-map 
   [the-map exp]
   (let [proc (the-map (first exp))]
@@ -337,20 +351,22 @@
 
 (defn analyze 
   [exp]
-    (cond 
-      (self-evaluating? exp) (analyze-self-evaluating exp)
-      (variable? exp) (analyze-variable exp)
-      (can-analyze-from-map? global-analyze-map exp) (do-analyze-from-map global-analyze-map exp)
-      (application? exp) (analyze-application exp)
-      :else (error "Unknown expression type -- EVAL" exp))
-)
+  (cond 
+    (self-evaluating? exp) (analyze-self-evaluating exp)
+    (variable? exp) (analyze-variable exp)
+    (can-analyze-from-map? global-analyze-map exp) (do-analyze-from-map global-analyze-map exp)
+    (define? exp) (analyze-definition exp)
+    (set!? exp) (analyze-assignment exp)
+    (application? exp) (analyze-application exp)
+    :else (error "Unknown expression type -- EVAL" exp))
+  )
 
 (defn do-eval 
   [exp env]
-    (let [proc (analyze exp)]
-      (proc env)
-      )
-)
+  (let [proc (analyze exp)]
+    (proc env)
+    )
+  )
 ;(do-eval '((lambda (a b) (+ a b)) 1 2) global-environment)
 ;(define fib (lambda (n) (cond ((= n 0) 0) ((= n 1) 1) (else (+ (fib (- n 1)) (fib (- n 2)))))))
 
