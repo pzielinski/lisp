@@ -207,7 +207,7 @@
         params (rest variable)
         body-proc (analyze (definition-value exp)) ;single expression only !!!
         ]
-    (fn [env] (define-variable! function-name (make-procedure params body-proc env) env))
+    (fn [env] (set-variable-value-in-env function-name (make-procedure params body-proc env) env))
     )
   )
 
@@ -216,7 +216,7 @@
   (let [variable (definition-variable exp)
         value-proc (analyze (definition-value exp))
         ]
-    (fn [env] (define-variable! variable (value-proc env) env))
+    (fn [env] (set-variable-value-in-env variable (value-proc env) env))
     )
   )
 
@@ -309,7 +309,7 @@
   (let [primitives-map (make-primitives-map primitive-procedure-impl-map)]
   (extend-environment-with-map 
     primitives-map 
-    (define-variable! 'false false (define-variable! 'true true env)))
+    (set-variable-value-in-env 'false false (set-variable-value-in-env 'true true env)))
   ))
 
 (def global-analyze-map

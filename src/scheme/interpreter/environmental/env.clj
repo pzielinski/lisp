@@ -22,11 +22,6 @@
     (get env variable)
 )
 
-(defn define-variable! 
-  [variable value env]
-    (set-variable-value-in-env variable value env)
-  )
-
 (defn extend-environment 
   [variables values env] 
   (if (and (empty? variables) (empty? values))
