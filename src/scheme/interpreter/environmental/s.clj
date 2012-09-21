@@ -32,6 +32,21 @@
 (declare analyze)
 (declare do-eval)
 
+(defn make-result
+  [return env]
+    {:return return :env env}
+  )
+
+(defn get-result-return
+  [eval-result]
+    (:return eval-result)
+  )
+
+(defn get-result-env
+  [eval-result]
+    (:env eval-result)
+  )
+
 (defn primitive-procedure-impl
   [primitive-procedure-impl-map, k]
   (primitive-procedure-impl-map k)
@@ -170,33 +185,50 @@
 
 (defn analyze-self-evaluating 
   [exp] 
-  (fn [env] exp)
+  (fn [env] 
+    (make-result exp env)
+    )
   )
 
 (defn analyze-variable 
   [exp] 
-  (fn [env] (lookup-variable-value-in-env exp env))
+  (fn [env] 
+    (make-result (lookup-variable-value-in-env exp env) env)
+    )
   )
 
 (defn analyze-quotation 
   [exp]
-  (let [value (text-of-quotation exp)]
-    (fn [env] value))
+  (fn [env]
+    (make-result (text-of-quotation exp) env)
+    )
   )
 
 (defn analyze-assignment 
   [exp] 
   (let [variable (assignment-variable exp)
-        value-proc (analyze (assignment-value exp))
-        ]
-    (fn [env] (set-variable-value-in-env variable (value-proc env) env))
+        value-proc (analyze (assignment-value exp))]
+    (fn [env]
+      (let [value-proc-result (value-proc env);value for assignment is evaluated immediately!
+            value-proc-return-value (get-result-return value-proc-result)]
+        (make-result 
+          'ok 
+          ;use original env, do not propagate env resulting from evaluating assignment value
+          (set-variable-value-in-env variable value-proc-return-value env))
+        )
+      )
     )
   )
 
 (defn analyze-cond 
   [exp]
   (let [condifexp-proc (analyze (cond->if exp))] 
-    (fn [env] (condifexp-proc env))
+    (fn [env]
+      (let [cond-result (condifexp-proc env)
+            cond-return-val (get-result-return cond-result)]
+        (make-result cond-return-val env);use original env
+        )
+      )
     )
   )
 
@@ -205,18 +237,31 @@
   (let [variable (definition-variable exp)
         function-name (first variable)
         params (rest variable)
-        body-proc (analyze (definition-value exp)) ;single expression only !!!
-        ]
-    (fn [env] (set-variable-value-in-env function-name (make-procedure params body-proc env) env))
+        body-proc (analyze (definition-value exp))];single expression only, use begin!!!
+    (fn [env] 
+      (make-result 
+        'ok
+        ;use new env, created by adding def
+        (set-variable-value-in-env 
+          function-name 
+          (make-procedure params body-proc env) env))
+      )
     )
   )
 
 (defn analyze-definition-of-variable 
   [exp] 
   (let [variable (definition-variable exp)
-        value-proc (analyze (definition-value exp))
-        ]
-    (fn [env] (set-variable-value-in-env variable (value-proc env) env))
+        value-proc (analyze (definition-value exp))]
+    (fn [env]
+      (let [value-proc-result (value-proc env);evaluated immediately
+            value-proc-return-value (get-result-return value-proc-result)]
+        (make-result 
+          'ok
+          ;use new env, created by adding def, but skip env resulting from evaluating definition value
+          (set-variable-value-in-env variable value-proc-return-value env));value for define is evaluated immediately!
+        )
+      )
     )
   )
 
@@ -225,49 +270,72 @@
   (let [variable (definition-variable exp)]
     (if (variable? variable)
       (analyze-definition-of-variable exp)
-      (analyze-definition-of-function exp)))
-  )
-
-(defn analyze-if 
-  [exp]
-  (let [predicate-proc (analyze (if-predicate exp))
-        consequent-proc (analyze (if-consequent exp))
-        alternative-proc (analyze (if-alternative exp))
-        ]
-    (fn [env]
-      (if (true? (predicate-proc env))
-        (consequent-proc env)
-        (alternative-proc env))
-      )
+      (analyze-definition-of-function exp))
     )
   )
 
 (defn analyze-lambda 
   [exp] 
   (let [params (lambda-parameters exp)
-        body-proc (analyze (lambda-body exp)) ;single expression only !!!
+        body-proc (analyze (lambda-body exp));single expression only, use begin!
         ]
-    (fn [env] (make-procedure params body-proc env))
+    (fn [env]
+      (make-result (make-procedure params body-proc env) env)
+      )
+    )
+  )
+
+(defn analyze-if 
+  [exp]
+  (let [predicate-proc (analyze (if-predicate exp))
+        consequent-proc (analyze (if-consequent exp))
+        alternative-proc (analyze (if-alternative exp))]
+    (fn [env]
+      (if (true? (get-result-return (predicate-proc env)))
+        (consequent-proc env)
+        (alternative-proc env))
+      )
     )
   )
 
 (defn analyze-sequence 
   [exps]
-    (cond
-      (empty? exps) (fn [env] )
-      (= (count exps) 1) (fn [env] ((analyze (first exps)) env))
-      :else
-      (reduce 
-        (fn [exp1 exp2]
-          (let [exp1-proc (analyze exp1)
-                exp2-proc (analyze exp2)
-                ]        
-            (fn [env] (exp1-proc env) (exp2-proc env))
-            ))
-        exps
-        )  
-      ;(map-nth #(do-eval % env) exps)
+  (cond
+    (empty? exps) 
+    (fn [env] )
+    (= (count exps) 1) 
+    (let [exp (first exps)
+          exp-proc (analyze exp)]
+      (fn [env] 
+        (let [exp-result (exp-proc env) 
+              exp-ret (get-result-return exp-result)
+              exp-env (get-result-env exp-result)]
+          (make-result exp-ret exp-env)))
       )
+    :else
+    (reduce 
+      (fn [fn1 fn2]
+        (fn [env] 
+          (let [exp1-result (fn1 env) 
+                exp1-ret (get-result-return exp1-result)
+                exp1-env (get-result-env exp1-result)
+                exp2-result (fn2 exp1-env);use env returned by eval of previous exp
+                exp2-ret (get-result-return exp2-result)
+                exp2-env (get-result-env exp2-result)]
+            (make-result exp2-ret exp2-env))))
+      ;create a list of functions fn[env]
+      (map 
+        (fn [exp] 
+          (let [exp-proc (analyze exp)]
+            (fn [env] 
+              (let [exp-result (exp-proc env) 
+                    exp-ret (get-result-return exp-result)
+                    exp-env (get-result-env exp-result)]
+                (make-result exp-ret exp-env)));pass new env
+            )) 
+        exps)
+      )
+    )
   )
 
 (defn analyze-begin
@@ -284,23 +352,23 @@
        (let [params (procedure-parameters procedure)
              proc-env (procedure-environment procedure)
              env (extend-environment params arguments proc-env)
-             body (procedure-body procedure) 
-             ] 
-         (body env)
+             body (procedure-body procedure)]
+         (get-result-return (body env))
          )
     :else 
        (error "Unknown procedure type -- APPLY" procedure)))
 
-(defn analyze-application 
+(defn analyze-application
   [exp] 
   (let [operator-proc (analyze (operator exp))
-        value-procs (map #(analyze %) (operands exp))
-        ]
+        arg-procs (map #(analyze %) (operands exp))]
     (fn [env] 
-      (let [operator (operator-proc env)
-            args (map #(% env) value-procs)
-            ]
-        (execute-application operator args)))
+      (let [operator (get-result-return (operator-proc env))
+            args (map #(get-result-return (% env)) arg-procs)]
+        ;keep original env
+        (make-result (execute-application operator args) env)
+        )
+      )
     )
   )
 
@@ -346,6 +414,7 @@
 (defn do-analyze-from-map 
   [the-map exp]
   (let [proc (the-map (first exp))]
+    ;each proc returns fn[env] that returns map
     (proc exp))
 )
 
@@ -367,8 +436,6 @@
     (proc env)
     )
   )
-;(do-eval '((lambda (a b) (+ a b)) 1 2) global-environment)
-;(define fib (lambda (n) (cond ((= n 0) 0) ((= n 1) 1) (else (+ (fib (- n 1)) (fib (- n 2)))))))
 
 (defn user-print 
   [object]
@@ -383,34 +450,28 @@
     )
   )
 
-(def input-prompt ";;; in>:")
+(def input-prompt "in:")
 
-(def output-prompt ";;; out:")
+(def output-prompt "=>")
 
-(defn driver-loop
-  [env]
+(defn repl
+  []
+  (loop [env (setup-environment global-primitive-procedure-impl-map (the-empty-environment))]
     (let [input (read)]
       (println input)
       (if (= (str input) "exit")
-        "exit"
-        (if (not (nil? input))
-          (let [output (do-eval input env)]
-            (println output-prompt)
-            (user-print output)
-            ))))
+        (println "exit requested by user")
+        (if (nil? input)
+          (recur env)
+          (let [output-result (do-eval input env)
+                output-value (get-result-return output-result)
+                output-env (get-result-env output-result)]
+            (print output-prompt)
+            (user-print output-value)
+            (recur output-env)
+            )
+          )
+        )
+      )
     )
-
-(def global-environment 
-  (setup-environment global-primitive-procedure-impl-map (the-empty-environment)))
-
-(defn s 
-  []
-  (if (= (driver-loop global-environment) "exit")
-    (println "exit requested by user")
-    (s))
   )
-
-;(run-all-tests) 
-;(with-junit-output (run-tests))
-;(run-tests)
-;C:\Users\Piotr\workspace\lisp\classes>java -classpath .\..\clojure.jar;C:\Users\Piotr\workspace\lisp\classes clojure.main -i "scheme\interpreter\environmental\s.clj" -e "(use 'clojure.test) (run-all-tests)"
