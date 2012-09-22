@@ -47,6 +47,11 @@
     (:env eval-result)
   )
 
+(defn make-identity-eval-fn 
+  [x]
+  (fn [env] (make-result x env))
+  )
+
 (defn primitive-procedure-impl
   [primitive-procedure-impl-map, k]
   (primitive-procedure-impl-map k)
@@ -69,7 +74,7 @@
 
 (defn make-primitives-map 
   [primitive-procedure-impl-map]
-  (map-the-map identity #(make-primitive %) primitive-procedure-impl-map)
+  (map-the-map identity (fn [x] (make-identity-eval-fn (make-primitive x))) primitive-procedure-impl-map)
   )
 
 (defn make-procedure 
@@ -242,8 +247,11 @@
         ;use new env, created by adding def
         (set-variable-value-in-env 
           function-name 
-          (make-procedure params body-proc env) env))
-      )
+          (fn [env]
+            (make-result (make-procedure params body-proc env) env)
+            )
+          env
+          )))
     )
   )
 
@@ -254,7 +262,7 @@
     (fn [env]
       (make-result 
         'ok
-        ;use new env, created by adding def, but skip env resulting from evaluating definition value
+        ;use new env, created by adding def
         (set-variable-value-in-env variable value-proc env))
       )
     )
@@ -276,8 +284,7 @@
         ]
     (fn [env]
       (make-result (make-procedure params body-proc env) env)
-      )
-    )
+      ))
   )
 
 (defn analyze-if 
@@ -339,11 +346,11 @@
 )
 
 (defn execute-application 
-  [procedure arg-procs] 
+  [procedure arg-procs env] 
   (cond 
     (primitive-procedure? procedure)
     (let [args (map #(get-result-return (% env)) arg-procs)]
-      (apply-primitive-procedure procedure arguments))
+      (apply-primitive-procedure procedure args))
     (compound-procedure? procedure) 
        (let [params (procedure-parameters procedure)
              proc-env (procedure-environment procedure)
@@ -360,7 +367,7 @@
         arg-procs (map #(analyze %) (operands exp))]
     (fn [env] 
       (let [operator (get-result-return (operator-proc env))]
-        (make-result (execute-application operator arg-procs) env);keep original env
+        (make-result (execute-application operator arg-procs env) env);keep original env
         )
       )
     )
@@ -369,8 +376,8 @@
 (defn setup-environment
   [primitive-procedure-impl-map env]
   (let [primitives-map (make-primitives-map primitive-procedure-impl-map)
-        env1 (set-variable-value-in-env 'true (fn [env] (make-result true env)) env)
-        env2 (set-variable-value-in-env 'false (fn [env] (make-result false env)) env1)]
+        env1 (set-variable-value-in-env 'true (make-identity-eval-fn true) env)
+        env2 (set-variable-value-in-env 'false (make-identity-eval-fn false) env1)]
     (extend-environment-with-map primitives-map env2)
     )
   )
