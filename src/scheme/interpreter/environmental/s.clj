@@ -193,8 +193,10 @@
 (defn analyze-variable 
   [exp] 
   (fn [env] 
-    (make-result (lookup-variable-value-in-env exp env) env)
-    )
+    (let [value-proc (lookup-variable-value-in-env exp env)
+          value-proc-result (value-proc env)
+          value-proc-return-value (get-result-return value-proc-result)]
+      (make-result value-proc-return-value env)));keep original env
   )
 
 (defn analyze-quotation 
@@ -209,13 +211,9 @@
   (let [variable (assignment-variable exp)
         value-proc (analyze (assignment-value exp))]
     (fn [env]
-      (let [value-proc-result (value-proc env);value for assignment is evaluated immediately!
-            value-proc-return-value (get-result-return value-proc-result)]
-        (make-result 
-          'ok 
-          ;use original env, do not propagate env resulting from evaluating assignment value
-          (set-variable-value-in-env variable value-proc-return-value env))
-        )
+      (make-result 
+        'ok 
+        (set-variable-value-in-env variable value-proc env));use original env
       )
     )
   )
@@ -254,13 +252,10 @@
   (let [variable (definition-variable exp)
         value-proc (analyze (definition-value exp))]
     (fn [env]
-      (let [value-proc-result (value-proc env);evaluated immediately
-            value-proc-return-value (get-result-return value-proc-result)]
-        (make-result 
-          'ok
-          ;use new env, created by adding def, but skip env resulting from evaluating definition value
-          (set-variable-value-in-env variable value-proc-return-value env));value for define is evaluated immediately!
-        )
+      (make-result 
+        'ok
+        ;use new env, created by adding def, but skip env resulting from evaluating definition value
+        (set-variable-value-in-env variable value-proc env))
       )
     )
   )
@@ -344,14 +339,15 @@
 )
 
 (defn execute-application 
-  [procedure arguments] 
+  [procedure arg-procs] 
   (cond 
-    (primitive-procedure? procedure) 
-       (apply-primitive-procedure procedure arguments)
+    (primitive-procedure? procedure)
+    (let [args (map #(get-result-return (% env)) arg-procs)]
+      (apply-primitive-procedure procedure arguments))
     (compound-procedure? procedure) 
        (let [params (procedure-parameters procedure)
              proc-env (procedure-environment procedure)
-             env (extend-environment params arguments proc-env)
+             env (extend-environment params arg-procs proc-env)
              body (procedure-body procedure)]
          (get-result-return (body env))
          )
@@ -363,10 +359,8 @@
   (let [operator-proc (analyze (operator exp))
         arg-procs (map #(analyze %) (operands exp))]
     (fn [env] 
-      (let [operator (get-result-return (operator-proc env))
-            args (map #(get-result-return (% env)) arg-procs)]
-        ;keep original env
-        (make-result (execute-application operator args) env)
+      (let [operator (get-result-return (operator-proc env))]
+        (make-result (execute-application operator arg-procs) env);keep original env
         )
       )
     )
@@ -374,11 +368,12 @@
 
 (defn setup-environment
   [primitive-procedure-impl-map env]
-  (let [primitives-map (make-primitives-map primitive-procedure-impl-map)]
-  (extend-environment-with-map 
-    primitives-map 
-    (set-variable-value-in-env 'false false (set-variable-value-in-env 'true true env)))
-  ))
+  (let [primitives-map (make-primitives-map primitive-procedure-impl-map)
+        env1 (set-variable-value-in-env 'true (fn [env] (make-result true env)) env)
+        env2 (set-variable-value-in-env 'false (fn [env] (make-result false env)) env1)]
+    (extend-environment-with-map primitives-map env2)
+    )
+  )
 
 (def global-analyze-map
   {
