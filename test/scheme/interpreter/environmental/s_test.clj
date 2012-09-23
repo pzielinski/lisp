@@ -24,6 +24,13 @@
   (is (= 'x (get-result-return ((do-analyze-from-map global-analyze-map '(quote x)) nil))))
   )
 
+(def factorial
+  (fn [n]
+    (loop [cnt n acc 1]
+       (if (zero? cnt)
+            acc
+          (recur (dec cnt) (* acc cnt))))))
+
 (deftest do-eval-test 
   (let [env (setup-environment global-primitive-procedure-impl-map (the-empty-environment))]
     ;primitive
@@ -92,11 +99,31 @@
     (is (= 3 (get-result-return (do-eval '((lambda (a b) (+ a b)) 1 2) env))))
     (is (= 5 (get-result-return (do-eval '((lambda (a b) (+ a b)) (+ 1 2) 2) env))))
     (is (= 10 (get-result-return (do-eval '((lambda (a b) (+ a b)) (+ 1 2) ((lambda (a b) (+ a b)) 3 4)) env))))
+    ;recursion
+    (let [e1 (get-result-env (do-eval '(define fact (lambda (n x) (if (= n 1) x (fact (- n 1) (* n x))))) env))]
+      (is (= 1 (get-result-return (do-eval '(fact 1 1) e1))))
+      (is (= 2 (get-result-return (do-eval '(fact 2 1) e1))))
+      (is (= 6 (get-result-return (do-eval '(fact 3 1) e1))))
+      (is (= 24 (get-result-return (do-eval '(fact 4 1) e1))))
+      (is (= (factorial 20) (get-result-return (do-eval '(fact 20 1) e1))))
+      )
+    (let [e1 (get-result-env 
+               (do-eval 
+                 '(define arithmetic-s (lambda (n sum) (if (= n 0) sum (arithmetic-s (- n 1) (+ n sum))))) 
+                 env))]
+      (is (= 1 (get-result-return (do-eval '(arithmetic-s 1 0) e1))))
+      (is (= 3 (get-result-return (do-eval '(arithmetic-s 2 0) e1))))
+      (is (= 6 (get-result-return (do-eval '(arithmetic-s 3 0) e1))))
+      (is (= 190 (get-result-return (do-eval '(arithmetic-s 19 0) e1))))
+      (let [n 100
+            sum (* (/ (+ n 1) 2) n)
+            e2 (get-result-env (do-eval (list 'define 'n n) e1))]
+        (is (= sum (get-result-return (do-eval '(arithmetic-s n 0) e2)))))
+      )
     )
   )
 
 ;(define fib (lambda (n) (cond ((= n 0) 0) ((= n 1) 1) (else (+ (fib (- n 1)) (fib (- n 2)))))))
-;(define mulx (lambda (n x) (if (= n 1) x (mulx (- n 1) (* n x)))))
 
 (run-tests)
 ;(run-all-tests) 

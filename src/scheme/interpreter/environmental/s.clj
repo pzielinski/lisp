@@ -346,10 +346,10 @@
 )
 
 (defn execute-application 
-  [procedure arg-procs env] 
+  [procedure arg-procs] 
   (cond 
     (primitive-procedure? procedure)
-    (let [args (map #(get-result-return (% env)) arg-procs)]
+    (let [args (map #(get-result-return (% nil)) arg-procs)];nil env, use captured one
       (apply-primitive-procedure procedure args))
     (compound-procedure? procedure) 
        (let [params (procedure-parameters procedure)
@@ -366,8 +366,10 @@
   (let [operator-proc (analyze (operator exp))
         arg-procs (map #(analyze %) (operands exp))]
     (fn [env] 
-      (let [operator (get-result-return (operator-proc env))]
-        (make-result (execute-application operator arg-procs env) env);keep original env
+      (let [operator (get-result-return (operator-proc env))
+            ;capture this env
+            arg-env-procs (map (fn [arg-proc] (fn [proc-env] (arg-proc env))) arg-procs)]
+        (make-result (execute-application operator arg-env-procs) env);keep original env
         )
       )
     )
