@@ -20,10 +20,6 @@
   (is (= false (can-analyze-from-map? global-analyze-map '())))
   )
 
-(deftest do-analyze-from-map-test 
-  (is (= 'x (get-result-return ((do-analyze-from-map global-analyze-map '(quote x)) nil))))
-  )
-
 (def factorial
   (fn [n]
     (loop [cnt n acc 1]
