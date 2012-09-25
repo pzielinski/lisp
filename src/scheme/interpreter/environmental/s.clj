@@ -49,7 +49,19 @@
 
 (defn make-identity-eval-fn 
   [x]
-  (fn [env] (make-result x env))
+  (fn [env] 
+    (make-result x env))
+  )
+
+(defn fxs-make-identity
+  [x]
+  (fn [env] 
+    (list (fn [res] (make-result x env))))
+  )
+
+(defn fxs-reduce
+  [result fxs]
+  (reduce (fn [res fx] (fx res)) result fxs)
   )
 
 (defn primitive-procedure-impl
@@ -189,19 +201,17 @@
   (nth exp 1))
 
 (defn analyze-self-evaluating 
-  [exp] 
-  (fn [env] 
-    (make-result exp env)
-    )
+  [exp]
+  (fxs-make-identity exp)
   )
 
 (defn analyze-variable 
   [exp] 
-  (fn [env] 
+  (fn [env]
     (let [value-proc (lookup-variable-value-in-env exp env)
           value-proc-result (value-proc env)
           value-proc-return-value (get-result-return value-proc-result)]
-      (make-result value-proc-return-value env)));keep original env
+      (list (fn [res] (make-result value-proc-return-value env)))))
   )
 
 (defn analyze-quotation 
@@ -434,10 +444,10 @@
     :else (error "Unknown expression type -- EVAL" exp))
   )
 
-(defn do-eval 
+(defn do-eval
   [exp env]
   (let [proc (analyze exp)]
-    (proc env)
+    (fxs-reduce nil (proc env))
     )
   )
 
