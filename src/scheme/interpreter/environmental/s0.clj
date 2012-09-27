@@ -32,6 +32,38 @@
 (declare analyze)
 (declare do-eval)
 
+(defn delay-it
+  [proc env]
+  (list 'thunk proc env)
+  )
+
+(defn thunk?
+  [obj]
+  (tagged-list? obj 'thunk)
+  )
+
+(defn thunk-proc
+  [obj]
+  (nth obj 1)
+  )
+
+(defn thunk-env
+  [obj]
+  (nth obj 2)
+  )
+
+(defn force-it
+  [obj]
+  (if (not (thunk? obj))
+    obj
+    (let [proc (thunk-proc obj)
+          env (thunk-env obj)
+          new-obj-result (proc env)
+          new-obj (get-result-return new-obj-result)]
+      (recur new-obj)
+      ));TODO: memoize!
+  )
+
 (defn make-result
   [return env]
     {:return return :env env}
@@ -45,11 +77,6 @@
 (defn get-result-env
   [eval-result]
     (:env eval-result)
-  )
-
-(defn make-identity-eval-fn 
-  [x]
-  (fn [env] (make-result x env))
   )
 
 (defn primitive-procedure-impl
@@ -74,7 +101,7 @@
 
 (defn make-primitives-map 
   [primitive-procedure-impl-map]
-  (map-the-map identity (fn [x] (make-identity-eval-fn (make-primitive x))) primitive-procedure-impl-map)
+  (map-the-map identity (fn [x] (make-primitive x)) primitive-procedure-impl-map)
   )
 
 (defn make-procedure 
@@ -82,7 +109,7 @@
   (list 'procedure parameters body env))
 
 (defn apply-primitive-procedure 
-  [procedure arguments] 
+  [procedure arguments]
   (apply-in-underlying-interpreter (primitive-implementation procedure) arguments))
 
 (defn assignment-variable 
@@ -198,10 +225,9 @@
 (defn analyze-variable 
   [exp] 
   (fn [env] 
-    (let [value-proc (lookup-variable-value-in-env exp env)
-          value-proc-result (value-proc env)
-          value-proc-return-value (get-result-return value-proc-result)]
-      (make-result value-proc-return-value env)));keep original env
+    (let [value (lookup-variable-value-in-env exp env)
+          value-result (make-result value env)]
+      value-result))
   )
 
 (defn analyze-quotation 
@@ -218,7 +244,7 @@
     (fn [env]
       (make-result 
         'ok 
-        (set-variable-value-in-env variable value-proc env));use original env
+        (set-variable-value-in-env variable (get-result-return (value-proc env)) env));use new env
       )
     )
   )
@@ -244,15 +270,7 @@
     (fn [env] 
       (make-result 
         'ok
-        ;use new env, created by adding def
-        (set-variable-value-in-env 
-          function-name 
-          (fn [env]
-            (make-result (make-procedure params body-proc env) env)
-            )
-          env
-          )))
-    )
+        (set-variable-value-in-env function-name (make-procedure params body-proc env) env ))));new env
   )
 
 (defn analyze-definition-of-variable 
@@ -262,10 +280,8 @@
     (fn [env]
       (make-result 
         'ok
-        ;use new env, created by adding def
-        (set-variable-value-in-env variable value-proc env))
-      )
-    )
+        (set-variable-value-in-env variable (get-result-return (value-proc env)) env);new env
+        )))
   )
 
 (defn analyze-definition 
@@ -293,7 +309,7 @@
         consequent-proc (analyze (if-consequent exp))
         alternative-proc (analyze (if-alternative exp))]
     (fn [env]
-      (if (true? (get-result-return (predicate-proc env)))
+      (if (true? (get-result-return (force-it (predicate-proc env))))
         (consequent-proc env)
         (alternative-proc env))
       )
@@ -345,31 +361,30 @@
   (analyze-sequence (begin-actions exp)) 
 )
 
-(defn execute-application 
-  [procedure arg-procs] 
-  (cond 
-    (primitive-procedure? procedure)
-    (let [args (map #(get-result-return (% nil)) arg-procs)];nil env, use captured one
-      (apply-primitive-procedure procedure args))
-    (compound-procedure? procedure) 
-       (let [params (procedure-parameters procedure)
-             proc-env (procedure-environment procedure)
-             env (extend-environment params arg-procs proc-env)
-             body (procedure-body procedure)]
-         (get-result-return (body env))
-         )
-    :else 
-       (error "Unknown procedure type -- APPLY" procedure)))
-
 (defn analyze-application
   [exp] 
   (let [operator-proc (analyze (operator exp))
         arg-procs (map #(analyze %) (operands exp))]
     (fn [env] 
-      (let [operator (get-result-return (operator-proc env))
-            ;capture this env
-            arg-env-procs (map (fn [arg-proc] (fn [proc-env] (arg-proc env))) arg-procs)]
-        (make-result (execute-application operator arg-env-procs) env);keep original env
+      (let [procedure (get-result-return (force-it (operator-proc env)))];force operator!
+        (make-result 
+          (cond 
+            (primitive-procedure? procedure)
+            (let [args (map (fn [arg-proc] (get-result-return (force-it (arg-proc env)))) arg-procs)]
+              ;(println 'apply-primitive-procedure procedure args)
+              (apply-primitive-procedure procedure args))
+            (compound-procedure? procedure) 
+            (let [params (procedure-parameters procedure)
+                  arg-procs-delayed (map (fn [arg-proc] (delay-it arg-proc env)) arg-procs)
+                  proc-env (procedure-environment procedure)
+                  env (extend-environment params arg-procs-delayed proc-env)
+                  body (procedure-body procedure)]
+              (get-result-return (body env))
+              )
+            :else 
+            (error "Unknown procedure type -- APPLY" procedure))
+          env
+          )
         )
       )
     )
@@ -378,8 +393,8 @@
 (defn setup-environment
   [primitive-procedure-impl-map env]
   (let [primitives-map (make-primitives-map primitive-procedure-impl-map)
-        env1 (set-variable-value-in-env 'true (make-identity-eval-fn true) env)
-        env2 (set-variable-value-in-env 'false (make-identity-eval-fn false) env1)]
+        env1 (set-variable-value-in-env 'true true env)
+        env2 (set-variable-value-in-env 'false false env1)]
     (extend-environment-with-map primitives-map env2)
     )
   )
@@ -437,7 +452,7 @@
 (defn do-eval 
   [exp env]
   (let [proc (analyze exp)]
-    (proc env)
+    (force-it (proc env))
     )
   )
 

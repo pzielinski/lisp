@@ -44,7 +44,7 @@
     (is (= "1" (get-result-return (do-eval "1" env))))
     ;variable
     ;(is (thrown? Throwable (do-eval 'v env)) "Variable is not bound!");!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    (is (= 1 (get-result-return (do-eval 'v (extend-environment-with-map {'v (make-identity-eval-fn 1)} env)))))
+    (is (= 1 (get-result-return (do-eval 'v (extend-environment-with-map {'v 1} env)))))
     ;quoted
     (is (= 'x (get-result-return (do-eval '(quote x) env))))
     ;assignment
