@@ -32,6 +32,26 @@
 (declare analyze)
 (declare do-eval)
 
+(defn result?
+  [obj]
+    (map? obj)
+  )
+
+(defn make-result
+  [return env]
+    {:return return :env env}
+  )
+
+(defn get-result-return
+  [eval-result]
+    (:return eval-result)
+  )
+
+(defn get-result-env
+  [eval-result]
+    (:env eval-result)
+  )
+
 (defn delay-it
   [proc env]
   (list 'thunk proc env)
@@ -53,30 +73,23 @@
   )
 
 (defn force-it
-  [obj]
-  (if (not (thunk? obj))
-    obj
-    (let [proc (thunk-proc obj)
-          env (thunk-env obj)
-          new-obj-result (proc env)
-          new-obj (get-result-return new-obj-result)]
-      (recur new-obj)
-      ));TODO: memoize!
-  )
-
-(defn make-result
-  [return env]
-    {:return return :env env}
-  )
-
-(defn get-result-return
-  [eval-result]
-    (:return eval-result)
-  )
-
-(defn get-result-env
-  [eval-result]
-    (:env eval-result)
+  [objx env]
+  (if (result? objx)
+    (let [obj (get-result-return objx)]
+      (if (not (thunk? obj))
+        objx;was from result - do not eval - return result!
+        (let [new-proc (thunk-proc obj)
+              new-env (thunk-env obj)
+              new-obj (new-proc new-env)]
+          (force-it new-obj env))))
+    (let [obj objx]
+      (if (not (thunk? obj))
+        (force-it (obj env) env);was not result - must be proc - so eval
+        (let [new-proc (thunk-proc obj)
+              new-env (thunk-env obj)
+              new-obj (new-proc new-env)]
+          (force-it new-obj env)
+        ))));TODO: memoize!
   )
 
 (defn primitive-procedure-impl
@@ -309,7 +322,7 @@
         consequent-proc (analyze (if-consequent exp))
         alternative-proc (analyze (if-alternative exp))]
     (fn [env]
-      (if (true? (get-result-return (force-it (predicate-proc env))))
+      (if (true? (get-result-return (force-it predicate-proc env)))
         (consequent-proc env)
         (alternative-proc env))
       )
@@ -366,20 +379,21 @@
   (let [operator-proc (analyze (operator exp))
         arg-procs (map #(analyze %) (operands exp))]
     (fn [env] 
-      (let [procedure (get-result-return (force-it (operator-proc env)))];force operator!
+      (let [procedure (get-result-return (force-it operator-proc env))];force operator!
         (make-result 
           (cond 
             (primitive-procedure? procedure)
-            (let [args (map (fn [arg-proc] (get-result-return (force-it (arg-proc env)))) arg-procs)]
+            (let [args (map (fn [arg-proc] (get-result-return (force-it arg-proc env))) arg-procs)]
               ;(println 'apply-primitive-procedure procedure args)
               (apply-primitive-procedure procedure args))
             (compound-procedure? procedure) 
             (let [params (procedure-parameters procedure)
                   arg-procs-delayed (map (fn [arg-proc] (delay-it arg-proc env)) arg-procs)
                   proc-env (procedure-environment procedure)
-                  env (extend-environment params arg-procs-delayed proc-env)
+                  new-env (extend-environment params arg-procs-delayed proc-env)
                   body (procedure-body procedure)]
-              (get-result-return (body env))
+              ;(println 'apply-compound-procedure 'PROC= procedure 'ARGS= arg-procs-delayed 'END )
+              (get-result-return (body new-env))
               )
             :else 
             (error "Unknown procedure type -- APPLY" procedure))
@@ -452,7 +466,7 @@
 (defn do-eval 
   [exp env]
   (let [proc (analyze exp)]
-    (force-it (proc env))
+    (force-it proc env)
     )
   )
 
