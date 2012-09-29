@@ -9,6 +9,14 @@
     (= (first exp) the-tag)
     false))
 
+(defn tagged-list-content-1 
+  [exp] 
+  (nth exp 1))
+
+(defn tagged-list-content-2 
+  [exp] 
+  (nth exp 2))
+
 (defn application? 
   [exp] 
   (list? exp))

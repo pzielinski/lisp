@@ -235,12 +235,21 @@
     )
   )
 
+(defn force-delayed-val 
+  [value-delayed-or-not env] 
+  (if (tagged-list? value-delayed-or-not 'delayed-val)
+    (let [value-proc (tagged-list-content-1 value-delayed-or-not)
+          value-result (value-proc env)]
+          value-result)
+    (make-result value-delayed-or-not env))
+  )
+
 (defn analyze-variable 
   [exp] 
   (fn [env] 
-    (let [value (lookup-variable-value-in-env exp env)
-          value-result (make-result value env)]
-      value-result))
+    (let [value-delayed-or-not (lookup-variable-value-in-env exp env)
+          value (force-delayed-val value-delayed-or-not env)]
+      value))
   )
 
 (defn analyze-quotation 
@@ -293,7 +302,12 @@
     (fn [env]
       (make-result 
         'ok
-        (set-variable-value-in-env variable (get-result-return (value-proc env)) env);new env
+        (let [env1 (set-variable-value-in-env variable (list 'delayed-val value-proc) env)
+              value-delayed (lookup-variable-value-in-env variable env1)
+              value-result (force-delayed-val value-delayed env1)
+              value (get-result-return value-result)
+              env2 (set-variable-value-in-env variable value env1)]
+          env2);pass new env
         )))
   )
 
