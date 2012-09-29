@@ -72,6 +72,11 @@
   (nth obj 2)
   )
 
+(defn execute-procs
+  [procs env];lazy proc seq
+  (reduce (fn [result proc] (proc result)) (make-result nil env) procs)
+  )
+
 (defn force-it
   [objx env]
   (if (result? objx)
@@ -80,14 +85,14 @@
         objx;was from result - do not eval - return result!
         (let [new-proc (thunk-proc obj)
               new-env (thunk-env obj)
-              new-obj (new-proc new-env)]
+              new-obj (execute-procs new-proc new-env)]
           (force-it new-obj env))))
     (let [obj objx]
       (if (not (thunk? obj))
-        (force-it (obj env) env);was not result - must be proc - so eval
+        (force-it (execute-procs obj env) env);was not result - must be procs - so execute
         (let [new-proc (thunk-proc obj)
               new-env (thunk-env obj)
-              new-obj (new-proc new-env)]
+              new-obj (execute-procs new-proc new-env)]
           (force-it new-obj env)
         ))));TODO: memoize!
   )
@@ -229,46 +234,43 @@
   (nth exp 1))
 
 (defn analyze-self-evaluating 
-  [exp] 
-  (fn [env] 
-    (make-result exp env)
-    )
+  [exp]
+  (list
+    (fn [result] 
+      (make-result exp (get-result-env result))
+      ))
+  )
+
+(defn delay-val
+  [procs]
+  (list 'delayed-val value-procs)
   )
 
 (defn force-delayed-val 
   [value-delayed-or-not env] 
   (if (tagged-list? value-delayed-or-not 'delayed-val)
-    (let [value-proc (tagged-list-content-1 value-delayed-or-not)
-          value-result (value-proc env)]
+    (let [value-procs (tagged-list-content-1 value-delayed-or-not)
+          value-result (execute-procs value-procs env)]
           value-result)
     (make-result value-delayed-or-not env))
   )
 
 (defn analyze-variable 
   [exp] 
-  (fn [env] 
-    (let [value-delayed-or-not (lookup-variable-value-in-env exp env)
-          value (force-delayed-val value-delayed-or-not env)]
-      value))
+  (list 
+    (fn [result] 
+      (let [env (get-result-env result)
+            value-delayed-or-not (lookup-variable-value-in-env exp env)
+            value (force-delayed-val value-delayed-or-not env)]
+        value)))
   )
 
 (defn analyze-quotation 
   [exp]
-  (fn [env]
-    (make-result (text-of-quotation exp) env)
-    )
-  )
-
-(defn analyze-assignment 
-  [exp] 
-  (let [variable (assignment-variable exp)
-        value-proc (analyze (assignment-value exp))]
-    (fn [env]
-      (make-result 
-        'ok 
-        (set-variable-value-in-env variable (get-result-return (value-proc env)) env));use new env
-      )
-    )
+  (list
+    (fn [result]
+      (make-result (text-of-quotation exp) (get-result-env result))
+      ))
   )
 
 (defn analyze-cond 
@@ -278,36 +280,6 @@
       (let [cond-result (condifexp-proc env)
             cond-return-val (get-result-return cond-result)]
         (make-result cond-return-val env);use original env
-        )
-      )
-    )
-  )
-
-(defn analyze-definition-of-function 
-  [exp] 
-  (let [variable (definition-variable exp)
-        function-name (first variable)
-        params (rest variable)
-        body-proc (analyze (definition-value exp))];single expression only, use begin!!!
-    (fn [env] 
-      (make-result 
-        'ok
-        (set-variable-value-in-env function-name (make-procedure params body-proc env) env ))));new env
-  )
-
-(defn analyze-definition-of-variable 
-  [exp] 
-  (let [variable (definition-variable exp)
-        value-proc (analyze (definition-value exp))]
-    (fn [env]
-      (make-result 
-        'ok
-        (let [env1 (set-variable-value-in-env variable (list 'delayed-val value-proc) env)
-              value-delayed (lookup-variable-value-in-env variable env1)
-              value-result (force-delayed-val value-delayed env1)
-              value (get-result-return value-result)
-              env2 (set-variable-value-in-env variable value env1)]
-          env2);pass new env
         )))
   )
 
@@ -315,9 +287,20 @@
   [exp] 
   (let [variable (definition-variable exp)]
     (if (variable? variable)
-      (analyze-definition-of-variable exp)
-      (analyze-definition-of-function exp))
-    )
+      (let [variable (definition-variable exp)
+            value-procs (analyze (definition-value exp))]
+        (list
+          (fn [result]
+            (make-result 
+              'ok
+              (let [env (get-result-env result)
+                    env1 (set-variable-value-in-env variable (delay-val value-procs) env)
+                    value-delayed (lookup-variable-value-in-env variable env1)
+                    value-result (force-delayed-val value-delayed env1)
+                    value (get-result-return value-result)
+                    env2 (set-variable-value-in-env variable value env1)]
+                env2);pass new env
+              ))))))
   )
 
 (defn analyze-lambda 
@@ -392,28 +375,30 @@
   [exp] 
   (let [operator-proc (analyze (operator exp))
         arg-procs (map #(analyze %) (operands exp))]
-    (fn [env] 
-      (let [procedure (get-result-return (force-it operator-proc env))];force operator!
-        (make-result 
-          (cond 
-            (primitive-procedure? procedure)
-            (let [args (map (fn [arg-proc] (get-result-return (force-it arg-proc env))) arg-procs)]
-              ;(println 'apply-primitive-procedure procedure args)
-              (apply-primitive-procedure procedure args))
-            (compound-procedure? procedure) 
-            (let [params (procedure-parameters procedure)
-                  arg-procs-delayed (map (fn [arg-proc] (delay-it arg-proc env)) arg-procs)
-                  proc-env (procedure-environment procedure)
-                  new-env (extend-environment params arg-procs-delayed proc-env)
-                  body (procedure-body procedure)]
-              ;(println 'apply-compound-procedure 'PROC= procedure 'ARGS= arg-procs-delayed 'END )
-              (get-result-return (body new-env))
-              )
-            :else 
-            (error "Unknown procedure type -- APPLY" procedure))
-          env
-          )
+    (lazy-seq
+      (cons 
+        (fn [result] 
+          (let [env (get-result-env result)
+                procedure (force-it operator-proc (get-result-env result))];force operator!
+            (cond 
+              (primitive-procedure? procedure)
+              (let [args (map (fn [arg-proc] (get-result-return (force-it arg-proc env))) arg-procs)]
+                ;(println 'apply-primitive-procedure procedure args)
+                (make-result (apply-primitive-procedure procedure args)) env)
+              (compound-procedure? procedure)
+              (let [params (procedure-parameters procedure)
+                    arg-procs-delayed (map (fn [arg-proc] (delay-it arg-proc env)) arg-procs)
+                    proc-env (procedure-environment procedure)
+                    new-env (extend-environment params arg-procs-delayed proc-env)
+                    body (procedure-body procedure)]
+                ;(println 'apply-compound-procedure 'PROC= procedure 'ARGS= arg-procs-delayed 'END )
+                (make-result (delay-it body new-env) new-env)
+                )
+              :else 
+              (error "Unknown procedure type -- APPLY" procedure))
+            ))
         )
+      ()
       )
     )
   )
@@ -472,15 +457,14 @@
     (variable? exp) (analyze-variable exp)
     (can-analyze-from-map? global-analyze-map exp) (do-analyze-from-map global-analyze-map exp)
     (define? exp) (analyze-definition exp)
-    (set!? exp) (analyze-assignment exp)
     (application? exp) (analyze-application exp)
     :else (error "Unknown expression type -- EVAL" exp))
   )
 
 (defn do-eval 
   [exp env]
-  (let [proc (analyze exp)]
-    (force-it proc env)
+  (let [procs (analyze exp)]
+    (force-it procs env)
     )
   )
 
