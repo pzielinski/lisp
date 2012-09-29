@@ -82,6 +82,12 @@
     (is (= 5 (get-result-return (do-eval '(if (< 2 1) (+ 1 2) (- 7 2)) env))))
     ;lambda
     (is (= 5 (get-result-return (do-eval '((lambda (a b) (+ a b)) 2 3) env))))
+    ;clojure
+    (let [e1 (get-result-env (do-eval '(define adder (lambda (a) (lambda (x) (+ x a)))) env))
+          e2 (get-result-env (do-eval '(define add2 (adder 2)) e1))]
+      (is (= 5 (get-result-return (do-eval '(add2 3) e2))))
+      (is (= 7 (get-result-return (do-eval '((adder 3) 4) e1))))
+      )
     ;begin
     (let [e1 (get-result-env (do-eval '(begin (define x 2) (set! y (+ x 1))) env))]
       (is (= 2 (get-result-return (do-eval 'x e1))))
