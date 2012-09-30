@@ -236,15 +236,14 @@
 (defn analyze-self-evaluating 
   [exp]
   (list
-    (fn [result]
-      (let [env (get-result-env result)]
-        (make-result exp (get-result-env result))
-      )))
+    (fn [result] 
+      (make-result exp (get-result-env result))
+      ))
   )
 
 (defn delay-val
   [procs]
-  (list 'delayed-val procs)
+  (list 'delayed-val value-procs)
   )
 
 (defn force-delayed-val 
@@ -270,21 +269,18 @@
   [exp]
   (list
     (fn [result]
-      (let [env (get-result-env result)]
-        (make-result (text-of-quotation exp) env)
-        )))
+      (make-result (text-of-quotation exp) (get-result-env result))
+      ))
   )
 
 (defn analyze-cond 
   [exp]
-  (let [condifexp-proc (analyze (cond->if exp))]
-    (list 
-      (fn [result]
-        (let [env (get-result-env result)]
-          (let [cond-result (execute-procs condifexp-proc env)
-                cond-return-val (get-result-return cond-result)]
-            (make-result cond-return-val env);use original env
-            )))))
+  (let [condifexp-proc (analyze (cond->if exp))] 
+    (fn [env]
+      (let [cond-result (condifexp-proc env)
+            cond-return-val (get-result-return cond-result)]
+        (make-result cond-return-val env);use original env
+        )))
   )
 
 (defn analyze-definition 
@@ -312,67 +308,61 @@
   (let [params (lambda-parameters exp)
         body-proc (analyze (lambda-body exp));single expression only, use begin!
         ]
-    (list
-      (fn [result]
-        (let [env (get-result-env result)]
-          (make-result (make-procedure params body-proc env) env)
-          ))))
+    (fn [env]
+      (make-result (make-procedure params body-proc env) env)
+      ))
   )
 
 (defn analyze-if 
   [exp]
-  (let [predicate-procs (analyze (if-predicate exp))
-        consequent-procs (analyze (if-consequent exp))
-        alternative-procs (analyze (if-alternative exp))]
-    (list
-      (fn [result]
-        (let [env (get-result-env result)]
-            (if (true? (get-result-return (force-it predicate-procs env)))
-              (execute-procs consequent-procs env)
-              (execute-procs alternative-procs env))
-            ))))
+  (let [predicate-proc (analyze (if-predicate exp))
+        consequent-proc (analyze (if-consequent exp))
+        alternative-proc (analyze (if-alternative exp))]
+    (fn [env]
+      (if (true? (get-result-return (force-it predicate-proc env)))
+        (consequent-proc env)
+        (alternative-proc env))
+      )
+    )
   )
 
 (defn analyze-sequence 
   [exps]
   (cond
     (empty? exps) 
-    (list 
-      (fn [result] ))
+    (fn [env] )
     (= (count exps) 1) 
     (let [exp (first exps)
-          exp-procs (analyze exp)]
-      (list 
-        (fn [result] 
-          (let [env (get-result-env result)
-                exp-result (execute-procs exp-procs env) 
-                exp-ret (get-result-return exp-result)
-                exp-env (get-result-env exp-result)]
-            (make-result exp-ret env))));pass ORIGINAL env
+          exp-proc (analyze exp)]
+      (fn [env] 
+        (let [exp-result (exp-proc env) 
+              exp-ret (get-result-return exp-result)
+              exp-env (get-result-env exp-result)]
+          (make-result exp-ret exp-env)))
       )
     :else
-    ;(concat
-      (map ;create a list of functions fn[result] from exps 
+    (reduce 
+      (fn [fn1 fn2]
+        (fn [env] 
+          (let [exp1-result (fn1 env) 
+                exp1-ret (get-result-return exp1-result)
+                exp1-env (get-result-env exp1-result)
+                exp2-result (fn2 exp1-env);use env returned by eval of previous exp
+                exp2-ret (get-result-return exp2-result)
+                exp2-env (get-result-env exp2-result)]
+            (make-result exp2-ret exp2-env))))
+      ;create a list of functions fn[env]
+      (map 
         (fn [exp] 
-          (let [exp-procs (analyze exp)]
-            (fn [result] 
-              (let [env (get-result-env result)
-                    exp-result (execute-procs exp-procs env) 
+          (let [exp-proc (analyze exp)]
+            (fn [env] 
+              (let [exp-result (exp-proc env) 
                     exp-ret (get-result-return exp-result)
-                    exp-env (get-result-env exp-result)
-                    original-env-lookup (lookup-variable-value-in-env :original-env env)
-                    original-env-to-pass (if (nil? original-env-lookup) env original-env-lookup)
-                    env-to-pass (set-variable-value-in-env :original-env original-env-to-pass exp-env)
-                    ]
-                (make-result exp-ret env-to-pass)));pass new env
+                    exp-env (get-result-env exp-result)]
+                (make-result exp-ret exp-env)));pass new env
             )) 
         exps)
-;      (list 
-;        (fn [result]
-;          (let [env (get-result-env result)
-;                original-env (lookup-variable-value-in-env :original-env env)]
-;          (make-result (get-result-return result) original-env))));pass original env at the end
-;      )
+      )
     )
   )
 
@@ -389,12 +379,12 @@
       (cons 
         (fn [result] 
           (let [env (get-result-env result)
-                procedure (get-result-return (force-it operator-proc env))];force operator!
+                procedure (force-it operator-proc (get-result-env result))];force operator!
             (cond 
               (primitive-procedure? procedure)
               (let [args (map (fn [arg-proc] (get-result-return (force-it arg-proc env))) arg-procs)]
                 ;(println 'apply-primitive-procedure procedure args)
-                (make-result (apply-primitive-procedure procedure args) env))
+                (make-result (apply-primitive-procedure procedure args)) env)
               (compound-procedure? procedure)
               (let [params (procedure-parameters procedure)
                     arg-procs-delayed (map (fn [arg-proc] (delay-it arg-proc env)) arg-procs)
@@ -407,11 +397,10 @@
               :else 
               (error "Unknown procedure type -- APPLY" procedure))
             ))
-        (list 
-          (fn [result]
-            (let [env (get-result-env result)]
-            (force-it result env))))
-        )))
+        )
+      ()
+      )
+    )
   )
 
 (defn setup-environment
@@ -457,7 +446,7 @@
 (defn do-analyze-from-map 
   [the-map exp]
   (let [proc (the-map (first exp))]
-    ;each proc returns fn[env] that returns result/map
+    ;each proc returns fn[env] that returns map
     (proc exp))
 )
 
