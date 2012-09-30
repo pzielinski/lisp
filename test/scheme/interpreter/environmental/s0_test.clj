@@ -20,8 +20,10 @@
   (is (= false (can-analyze-from-map? global-analyze-map '())))
   )
 
-(deftest do-analyze-from-map-test 
-  (is (= 'x (get-result-return ((do-analyze-from-map global-analyze-map '(quote x)) nil))))
+(deftest execute-procs-test 
+  (is (= true (execute-procs (list (fn [result] true)) {})))
+  (is (= :a (execute-procs (list (fn [result] :a) (fn [result] result)) {})))
+  (is (= :a (execute-procs (list (fn [result] :a) (fn [result] result) (fn [result] result)) {})))
   )
 
 (def factorial
@@ -47,6 +49,11 @@
     (is (= 1 (get-result-return (do-eval 'v (extend-environment-with-map {'v 1} env)))))
     ;quoted
     (is (= 'x (get-result-return (do-eval '(quote x) env))))
+    ;application & lambda
+    (is (= 2 (get-result-return (do-eval '(* 1 2) env))))
+    (is (= 3 (get-result-return (do-eval '((lambda (a b) (+ a b)) 1 2) env))))
+    (is (= 5 (get-result-return (do-eval '((lambda (a b) (+ a b)) (+ 1 2) 2) env))))
+    (is (= 10 (get-result-return (do-eval '((lambda (a b) (+ a b)) (+ 1 2) ((lambda (a b) (+ a b)) 3 4)) env))))
     ;definition
     (let [e1 (extend-environment-with-map '{} env)]
       (let [e2 (get-result-env (do-eval '(define x 2) e1))]
@@ -71,8 +78,6 @@
     (is (= 'a (get-result-return (do-eval '(if (> 2 1) 'a 'b) env))))
     (is (= 3 (get-result-return (do-eval '(if (> 2 1) (+ 1 2) 'b) env))))
     (is (= 5 (get-result-return (do-eval '(if (< 2 1) (+ 1 2) (- 7 2)) env))))
-    ;lambda
-    (is (= 5 (get-result-return (do-eval '((lambda (a b) (+ a b)) 2 3) env))))
     ;clojure
     (let [e1 (get-result-env (do-eval '(define adder (lambda (a) (lambda (x) (+ x a)))) env))
           e2 (get-result-env (do-eval '(define add2 (adder 2)) e1))]
@@ -80,7 +85,7 @@
       (is (= 7 (get-result-return (do-eval '((adder 3) 4) e1))))
       )
     ;begin
-    (let [e1 (get-result-env (do-eval '(begin (define x 2) (set! y (+ x 1))) env))]
+    (let [e1 (get-result-env (do-eval '(begin (define x 2) (define y (+ x 1))) env))]
       (is (= 2 (get-result-return (do-eval 'x e1))))
       (is (= 3 (get-result-return (do-eval 'y e1))))
       )
@@ -91,11 +96,6 @@
     (is (= 3 (get-result-return (do-eval '(cond (false 1) (false 2) (true 3) (else 4)) env))))
     (is (= 2 (get-result-return (do-eval '(cond ((= 1 (+ 1 1)) 1) ((= 2 (+ 1 1)) 2) (else 3)) env))))
     (is (= 3 (get-result-return (do-eval '(cond (false 1) (false 2) (else (+ 1 2))) env))))
-    ;application
-    (is (= 2 (get-result-return (do-eval '(* 1 2) env))))
-    (is (= 3 (get-result-return (do-eval '((lambda (a b) (+ a b)) 1 2) env))))
-    (is (= 5 (get-result-return (do-eval '((lambda (a b) (+ a b)) (+ 1 2) 2) env))))
-    (is (= 10 (get-result-return (do-eval '((lambda (a b) (+ a b)) (+ 1 2) ((lambda (a b) (+ a b)) 3 4)) env))))
     ;recursion
     (let [e1 (get-result-env (do-eval '(define fact (lambda (n x) (if (= n 1) x (fact (- n 1) (* n x))))) env))]
       (is (= 1 (get-result-return (do-eval '(fact 1 1) e1))))
@@ -121,7 +121,6 @@
   )
 
 ;(define fib (lambda (n) (cond ((= n 0) 0) ((= n 1) 1) (else (+ (fib (- n 1)) (fib (- n 2)))))))
-
 (run-tests)
 ;(run-all-tests) 
 ;(with-junit-output (run-tests))
